@@ -1,0 +1,68 @@
+{%- if messages[0]["role"] == "system" %}
+    {%- set system_message = messages[0]["content"] %}
+    {%- set loop_messages = messages[1:] %}
+{%- else %}
+    {%- set loop_messages = messages %}
+{%- endif %}
+
+{%- if not tools is defined %}
+    {%- set tools = none %}
+{%- endif %}
+
+{%- set user_messages = loop_messages | selectattr("role", "equalto", "user") | list %}
+
+{%- for message in loop_messages %}
+    {%- if message["role"] == "user" %}
+        {%- if tools is not none and (message == user_messages[-1]) %}
+            {%- if system_message is defined %}
+                {{- system_message + "\n\n" }}
+            {%- endif %}
+            {{- "You have access to the following tools:\n" }}
+            {%- for tool in tools %}
+                {%- set tool = tool.function if tool.function is defined else tool %}
+                {{- "interface " + tool.name + " {\n" }}
+                {%- for param_name, param in tool.parameters.properties.items() %}
+                    {{- "  " + param_name + ": " }}
+                    {%- if param.type == "array" %}
+                        {%- if param.items.type == "array" %}
+                            {{- param.items.items.type + "[][]" }}
+                        {%- else %}
+                            {{- param.items.type + "[]" }}
+                        {%- endif %}
+                    {%- else %}
+                        {{- param.type }}
+                    {%- endif %}
+                    {{- ";" }}
+                    {%- if param.description %}
+                        {{- " // " + param.description }}
+                    {%- endif %}
+                    {{- "\n" }}
+                {%- endfor %}
+                {{- "}\n" }}
+                {{- "// " + tool.description + "\n\n" }}
+            {%- endfor %}
+            {{- "You can choose to respond with one or more tool calls at once, or with a chat message back to the user. "}}
+            {{- "Ensure you have all necessary details before making tool calls. If additional information is needed, "}}
+            {{- "ask the user appropriately. Any tool call you make must correspond to the functions listed above.\n"}}
+            {{- "If you decide to call a tool, format it like this: "}}
+            {{- 'starttoolcall{"name": "<function_name>", "arguments": {"<arg1_name>": "<arg1_value>", "<arg2_name>": "<arg2_value>", ...}}endtoolcall\n\n'}}
+        {%- endif %}
+        {{- message["content"] }}
+    {%- elif message["role"] == "assistant" %}
+        {%- if message.tool_calls is defined %}
+            {%- for tool_call in message.tool_calls %}
+                {{- "starttoolcall" }}
+                {{- {"name": tool_call.function.name, "arguments": tool_call.function.arguments}|tojson }}
+                {{- "endtoolcall" }}
+            {%- endfor %}
+        {%- else %}
+            {{- message["content"] }}
+        {%- endif %}
+    {%- elif message["role"] == "tool" %}
+        {{- "start observation " + message["content"] + " end observation" }}
+    {%- endif %}
+{%- endfor %}
+
+{%- if add_generation_prompt and messages[-1]["role"] != "assistant" %}
+    {{- "\n" }}
+{%- endif %} 
